@@ -1,5 +1,5 @@
 ###############################################################################
-# "Papermill"
+# User Interface
 ###############################################################################
 
 from gbm import pyMatrix, pyGradientBoostingMachine
@@ -18,6 +18,7 @@ class Papermill (object):
         # base parameters
         num_threads = -1,
         seed = 0,
+        silent = False,
 
         loss_type = "mse", # "mse" or "log_loss" 
         eta = 0.3,
@@ -32,12 +33,13 @@ class Papermill (object):
         gamma_zero = 1.0e-5,
 
         # wrapper parameters
-        n_estimators = 100,
+        num_round = 100,
         ):
 
         # 
         self.num_threads = num_threads
         self.seed = seed
+        self.silent = silent
 
         self.loss_type = loss_type
         self.eta = eta
@@ -52,7 +54,7 @@ class Papermill (object):
         self.gamma_zero = gamma_zero
 
         #
-        self.n_estimators = n_estimators
+        self.num_round = num_round
 
         # internal objects
         self.num_rows = 0
@@ -61,9 +63,9 @@ class Papermill (object):
 
         # internal states
         self.early_stopping_rounds = 0
-        self.maximize = False
+        self.eval_metric = 0
 
-        self.best_iter = -1 # if best_iter > 0, it uses first n trees
+        self.best_round = 0
 
 
     def _init(self):
@@ -72,10 +74,12 @@ class Papermill (object):
         num_threads = self.num_threads
         seed = self.seed
 
+        silent = 1 if self.silent else 0
+
         if self.loss_type == "mse":
             loss_type = 0
         elif self.loss_type == "log_loss":
-            loss_type = 1
+            loss_type = 3
         elif self.loss_type == "user_defined":
             loss_type = 99
         else:
@@ -102,10 +106,13 @@ class Papermill (object):
 
         gamma_zero = self.gamma_zero
 
+
+        num_round = self.num_round
         # 
         self._gbm = pyGradientBoostingMachine(
             num_threads,
             seed,
+            silent,
 
             loss_type,
             eta,
@@ -117,7 +124,9 @@ class Papermill (object):
             colsample_bytree,
 
             normalize_target,
-            gamma_zero
+            gamma_zero,
+
+            num_round
             )
 
 
@@ -134,120 +143,92 @@ class Papermill (object):
         if not label.ndim == 1:
             raise ValueError("Invalid data input. Only 1d array is allowed.")
 
+    def _is_none(self, data):
+        if not isinstance(data, np.ndarray):
+            return True
+        
 
-    def fit(self, data_train, label_train):
-        self._check_data(data_train)
-        self._check_label(label_train)
-        self._init()
-
-        matrix_train = pyMatrix(data_train)
-        self._gbm._set_data(matrix_train, label_train)
-
-        # 
-        n = self.n_estimators
-
-        for i in range(n):
-            self._gbm._boost_one_iter()
-
-        self.best_iter = n - 1 # == last round of i
+    def fit(self, data_train, label_train,
+        data_valid=None, label_valid=None, eval_metric="rmse", early_stopping_rounds=5):
 
 
-    def fit_with_early_stopping(self,data_train, label_train, data_valid, label_valid,
-        eval_func, maximize=False, early_stopping_rounds=0):
+        if (self._is_none(data_valid) or self._is_none(label_valid)):
+            train_mode = 0 # just train, don't monitor
 
-        # ealry_stopping_rounds == 0 -> stop training whenever score_valid does not improve
+            self._check_data(data_train)
+            self._check_label(label_train)
+            self._init()
 
-        self.early_stopping_rounds = early_stopping_rounds
-        self.maximize = maximize
+            matrix_train = pyMatrix(data_train)
+            matrix_train._init()
 
-        self._check_data(data_train)
-        self._check_label(label_train)
-        self._check_data(data_valid)
-        self._check_label(label_valid)
-        self._init()
+            self._gbm._set_data(matrix_train, label_train)
+            self._gbm._set_train_mode(train_mode)
 
-        matrix_train = pyMatrix(data_train)
-        matrix_valid = pyMatrix(data_valid)
+            # 
+            n = self.num_round
+            for i in range(n):
+                self._gbm._boost_one_iter()
 
-        self._gbm._set_data(matrix_train, label_train)
-        b = self._gbm._get_bias() # bias can be obtained after setting data
+            #self.best_round = n-1
+            self.best_round = self._gbm._get_best_round()
 
-        pred_train = np.ones(label_train.shape[0], dtype=np.float32) * b
-        pred_valid = np.ones(label_valid.shape[0], dtype=np.float32) * b
+        else:
+            train_mode = 2 # fit with early stopping
 
-        # 
-        n = self.n_estimators
-        rl = early_stopping_rounds
+            self._check_data(data_train)
+            self._check_label(label_train)
+            self._check_data(data_valid)
+            self._check_label(label_valid)
 
-        time_start = time.time()
+            self._init()
 
-        for i in range(n):
-            self._gbm._boost_one_iter()
-
-            pred_train += np.array(self._gbm._predict_last(matrix_train), dtype=np.float32)
-            pred_valid += np.array(self._gbm._predict_last(matrix_valid), dtype=np.float32)
-
-            if self.loss_type == "log_loss":
-                score_train = eval_func(label_train, 1.0 / (1.0 + np.exp(-pred_train)))
-                score_valid = eval_func(label_valid, 1.0 / (1.0 + np.exp(-pred_valid)))
+            # init for early stopping
+            if eval_metric == "mse":
+                #eval_metric = 0
+                raise NotImplementedError
+            elif eval_metric == "rmse":
+                eval_metric = 1
+            elif eval_metric  == "mae":
+                #eval_metric = 2
+                raise NotImplementedError
+            elif eval_metric  == "log_loss":
+                eval_metric = 3
+            elif eval_metric == "roc_auc_score":
+                eval_metric = 4
+            elif eval_metric == "user_defined":
+                eval_metric = 99
             else:
-                score_train = eval_func(label_train, pred_train)
-                score_valid = eval_func(label_valid, pred_valid)
+                raise ValueError( "Invalid value for eval_metric.")
 
-            if i == 0:
-                best_score_train = score_train
-                best_score_valid = score_valid
-                best_iter = i
+            if (early_stopping_rounds == 0):
+                early_stopping_rounds = self.num_round + 1
 
-            if ((self.maximize and score_valid > best_score_valid) or
-                (not self.maximize and score_valid < best_score_valid)):
+            matrix_train = pyMatrix(data_train)
+            matrix_train._init() 
+            matrix_valid = pyMatrix(data_valid)
 
-                best_score_train = score_train
-                best_score_valid = score_valid
-                best_iter = i
+            self._gbm._set_data(matrix_train, label_train)
+            self._gbm._set_data_valid(matrix_valid, label_valid)
+            self._gbm._set_train_mode(train_mode)
+            self._gbm._set_eval_metric(eval_metric)
+            self._gbm._set_early_stopping_rounds(early_stopping_rounds)
 
-                rl = early_stopping_rounds
-            else:
-                rl -= 1
+            #
+            n = self.num_round
+            for i in range(n):
+                round_status = self._gbm._boost_one_iter()
+                if (round_status <= 0):
+                    break
 
-
-            # print
-            t = (time.time() - time_start) / (i + 1) # mean iter/second
-            s = "[{: >4d}]  train: {:0.6f}  valid: {:0.6f}  (best: {:0.6f}, {:})" \
-                .format(i, score_train, score_valid, best_score_valid, best_iter)
-            if (best_iter == i):
-                pass
-            print(s, file=sys.stderr)
-
-
-            # early stopping?
-            if i == 0:
-                continue
-            elif (rl <= 0 and early_stopping_rounds > 0):
-                print("early stopping ...", file=sys.stderr)
-                break
-
-
-        if (i == n-1):
-            print("reached max n_estimators ...", file=sys.stderr)
-
-        print("best iteration:", file=sys.stderr)
-        print("[{: >4d}]  train: {:0.6f}  valid: {:0.6f}" \
-            .format(best_iter, best_score_train, best_score_valid), file=sys.stderr)
-
-
-        self.best_iter = best_iter
-
+            self.best_round = self._gbm._get_best_round()
 
     def predict(self, data_test):
         self._check_data(data_test)
 
         matrix_test = pyMatrix(data_test)
 
-        label_test = self._gbm.predict(matrix_test, self.best_iter + 1) # num of trees == iter + 1
+        label_test = self._gbm.predict(matrix_test, self.best_round)
         label_test = np.array(label_test, dtype=np.float32)
-
-        if (self.loss_type == "log_loss"):
-            label_test = 1.0 / (1.0 + np.exp(-label_test))
 
         return label_test

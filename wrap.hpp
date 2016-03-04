@@ -2,7 +2,6 @@
 // wrapper for cython
 // ----------------------------------------------------------------------------
 
-
 #include <vector>
 
 #include "matrix.hpp"
@@ -21,6 +20,12 @@ void DeleteMatrix(Matrix *matrix_ptr) {
     delete matrix_ptr;
 };
 
+void MatrixInit(
+    Matrix *matrix_ptr
+    ) {
+    matrix_ptr->init();
+};
+
 
 // ----------------------------------------------------------------------------
 // gbm
@@ -29,6 +34,7 @@ void DeleteMatrix(Matrix *matrix_ptr) {
 GradientBoostingMachine* NewGradientBoostingMachine(
     int num_threads,
     int seed,
+    int silent,
 
     int loss_type,
     float eta,
@@ -40,13 +46,15 @@ GradientBoostingMachine* NewGradientBoostingMachine(
     float colsample_bytree,
 
     int normalize_target, 
-    float gamma_zero
+    float gamma_zero,
 
+    int num_round
     ) {
 
     GradientBoostingMachine *gbm_ptr = new GradientBoostingMachine(
         num_threads,
         seed,
+        silent,
 
         loss_type,
         eta,
@@ -58,7 +66,9 @@ GradientBoostingMachine* NewGradientBoostingMachine(
         colsample_bytree,
 
         normalize_target,
-        gamma_zero
+        gamma_zero,
+
+        num_round
         );
 
     return gbm_ptr;
@@ -79,42 +89,74 @@ void GradientBoostingMachineSetData(
 };
 
 
-void GradientBoostingMachineBoostOneIter(
+void GradientBoostingMachineSetDataValid(
     GradientBoostingMachine *gbm_ptr,
-    int n
+    Matrix *matrix_ptr,
+    std::vector<float> label
     ) {
-    gbm_ptr->boost_one_iter(n);
-}
-
-
-float GradientBoostingMachineGetBias(
-    GradientBoostingMachine *gbm_ptr
-    ) {
-
-    return gbm_ptr->get_bias();
+    gbm_ptr->set_data_valid(*matrix_ptr, label);
 };
 
 
-std::vector<float> GradientBoostingMachinePredictLast(
+void GradientBoostingMachineSetTrainMode(
     GradientBoostingMachine *gbm_ptr,
-    Matrix *matrix_ptr
+    int train_mode
+    ) {
+    gbm_ptr->set_train_mode(train_mode);
+};
+
+
+void GradientBoostingMachineSetEvalMetric(
+    GradientBoostingMachine *gbm_ptr,
+    int eval_metric
+    ) {
+    gbm_ptr->set_eval_metric(eval_metric);
+};
+
+
+void GradientBoostingMachineSetEarlyStoppingRounds(
+    GradientBoostingMachine *gbm_ptr,
+    int early_stopping_rounds
+    ) {
+    gbm_ptr->set_early_stopping_rounds(early_stopping_rounds);
+};
+
+
+std::vector<float> GradientBoostingMachineGetScores(
+    GradientBoostingMachine *gbm_ptr,
+    int score_type
     ) {
 
-    std::vector<float> p;
-    gbm_ptr->predict_last(*matrix_ptr, p);
+    std::vector<float> s;
+    gbm_ptr->get_scores(s, score_type);
 
-    return p;
+    return s;
+};
+
+
+int GradientBoostingMachineGetBestRound(
+    GradientBoostingMachine *gbm_ptr
+    ) {
+    return gbm_ptr->get_best_round();
+};
+
+
+int GradientBoostingMachineBoostOneIter(
+    GradientBoostingMachine *gbm_ptr,
+    int n
+    ) {
+    return gbm_ptr->boost_one_iter(n);
 };
 
 
 std::vector<float> GradientBoostingMachinePredict(
     GradientBoostingMachine *gbm_ptr,
     Matrix *matrix_ptr,
-    int l
+    int r
     ) {
 
     std::vector<float> p;
-    gbm_ptr->predict(*matrix_ptr, p, l);
+    gbm_ptr->predict(*matrix_ptr, p, r);
 
     return p;
 };

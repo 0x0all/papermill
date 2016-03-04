@@ -54,7 +54,15 @@ class Matrix {
             this->num_cols = num_cols;
 
             this->values = values;
+        };
 
+
+        ~Matrix() {
+        };
+
+
+        inline void init() {
+            // init is needed for using train
             ColEntries.resize(num_cols);
 
             for (int col_index = 0; col_index < num_cols; ++col_index) {
@@ -77,9 +85,6 @@ class Matrix {
 
                 std::sort(ce_begin, ce);
             }
-        };
-
-        ~Matrix() {
         };
 
         inline int getNumRows() const {

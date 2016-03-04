@@ -12,10 +12,13 @@ cdef extern from "wrap.hpp":
         )
     void DeleteMatrix(Matrix *matrix_ptr)
 
+    void MatrixInit(Matrix *matrix_ptr)
+
     # GradientBoostingMachine
     void* NewGradientBoostingMachine(
         int num_threads,
         int seed,
+        int silent,
 
         int loss_type,
         float eta,
@@ -27,7 +30,9 @@ cdef extern from "wrap.hpp":
         float colsample_bytree,
 
         int normalize_target,
-        float gamma_zero
+        float gamma_zero,
+        
+        int num_round
         )
     void DeleteGradientBoostingMachine(GradientBoostingMachine *gbm_ptr)
 
@@ -36,21 +41,39 @@ cdef extern from "wrap.hpp":
         Matrix *matrix_ptr,
         vector[float] label
         )
-    void GradientBoostingMachineBoostOneIter(
-        GradientBoostingMachine* gbm_ptr,
-        int n
+    void GradientBoostingMachineSetDataValid(
+        GradientBoostingMachine *grm_ptr,
+        Matrix *matrix_ptr,
+        vector[float] label
         )
-    float GradientBoostingMachineGetBias(
+    void GradientBoostingMachineSetTrainMode(
+        GradientBoostingMachine* gbm_ptr,
+        int train_mode
+        )
+    void GradientBoostingMachineSetEvalMetric(
+        GradientBoostingMachine* gbm_ptr,
+        int eval_metric
+        )
+    void GradientBoostingMachineSetEarlyStoppingRounds(
+        GradientBoostingMachine* gbm_ptr,
+        int early_stopping_rounds
+        )
+    vector[float] GradientBoostingMachineGetScores(
+        GradientBoostingMachine *grm_ptr,
+        int score_type
+        )
+    int GradientBoostingMachineGetBestRound(
         GradientBoostingMachine *grm_ptr
         )
-    vector[float] GradientBoostingMachinePredictLast(
-        GradientBoostingMachine *grm_ptr,
-        Matrix *matrix_ptr
+
+    int GradientBoostingMachineBoostOneIter(
+        GradientBoostingMachine* gbm_ptr,
+        int n
         )
     vector[float] GradientBoostingMachinePredict(
         GradientBoostingMachine *grm_ptr,
         Matrix *matrix_ptr,
-        int l
+        int r
         )
 
 
@@ -65,6 +88,8 @@ cdef class pyMatrix:
     def __dealloc__(self):
         DeleteMatrix(self.thisptr)
 
+    def _init(self):
+        MatrixInit(self.thisptr)
 
 
 cdef class pyGradientBoostingMachine:
@@ -76,6 +101,7 @@ cdef class pyGradientBoostingMachine:
 
         num_threads,
         seed,
+        silent,
 
         loss_type,
         eta,
@@ -87,12 +113,15 @@ cdef class pyGradientBoostingMachine:
         colsample_bytree,
 
         normalize_target,
-        gamma_zero
+        gamma_zero,
+
+        num_round
         ):
 
         self.thisptr = <GradientBoostingMachine*> NewGradientBoostingMachine(
             num_threads,
             seed,
+            silent,
 
             loss_type,
             eta,
@@ -104,7 +133,9 @@ cdef class pyGradientBoostingMachine:
             colsample_bytree, 
 
             normalize_target,
-            gamma_zero
+            gamma_zero,
+
+            num_round
             )
 
     def __dealloc__(self):
@@ -113,15 +144,26 @@ cdef class pyGradientBoostingMachine:
     def _set_data(self, pyMatrix matrix, vector[float] label):
         GradientBoostingMachineSetData(self.thisptr, <Matrix*> matrix.thisptr, label)
 
+    def _set_data_valid(self, pyMatrix matrix, vector[float] label):
+        GradientBoostingMachineSetDataValid(self.thisptr, <Matrix*> matrix.thisptr, label)
+
+    def _set_train_mode(self, int train_mode):
+        GradientBoostingMachineSetTrainMode(self.thisptr, train_mode)
+
+    def _set_eval_metric(self, int eval_metric):
+        GradientBoostingMachineSetEvalMetric(self.thisptr, eval_metric)
+
+    def _set_early_stopping_rounds(self, int early_stopping_rounds):
+        GradientBoostingMachineSetEarlyStoppingRounds(self.thisptr, early_stopping_rounds)
+
+    def _get_scores(self, int score_type):
+        return GradientBoostingMachineGetScores(self.thisptr, score_type)
+
+    def _get_best_round(self):
+        return GradientBoostingMachineGetBestRound(self.thisptr)
+
     def _boost_one_iter(self, int n = 1):
-        GradientBoostingMachineBoostOneIter(self.thisptr, n)
+        return GradientBoostingMachineBoostOneIter(self.thisptr, n)
 
-    def _get_bias(self):
-        return GradientBoostingMachineGetBias(self.thisptr)
-
-    def _predict_last(self, pyMatrix matrix):
-        return GradientBoostingMachinePredictLast(self.thisptr, <Matrix*> matrix.thisptr)
-
-    def predict(self, pyMatrix matrix, int l = -1):
-        return GradientBoostingMachinePredict(self.thisptr, <Matrix*> matrix.thisptr, l)
-
+    def predict(self, pyMatrix matrix, int r = -1):
+        return GradientBoostingMachinePredict(self.thisptr, <Matrix*> matrix.thisptr, r)

@@ -277,6 +277,8 @@ class BaseTree {
 
 
             for (int cur_depth = 0; cur_depth < max_depth; ++cur_depth) {
+                // Level 2 reduction 
+
                 update(matrix_full, (*matrix_sub), grad, hess);
 
                 if (queues.size() == 0) { break; }
@@ -387,6 +389,8 @@ class BaseTree {
             float sum_hess = 0.0f;
             int count = 0;
 
+            // dont' do this since it can harm reproducibility?
+            //#pragma omp parallel for reduction(+:sum_grad,sum_hess,count) schedule(static)
             for (int i = 0; i < num_rows_sampled; ++i) {
                 int row_index = row_index_list[i];
                 sum_grad += grad[row_index];
@@ -783,7 +787,7 @@ inline void calc_grad_hess(
             hess[i] = 2.0f;
         }
 
-    } else if (loss_type == 1) {
+    } else if (loss_type == 3) {
         // log_loss
         #pragma omp parallel for schedule(static)
         for (int i = 0; i < n; ++i) {
@@ -795,8 +799,144 @@ inline void calc_grad_hess(
     } else if (loss_type == 99) {
         // user_defined
     }
-
 }
+
+
+// ------------------------------------------------------------
+// for calculating score
+// ------------------------------------------------------------
+
+
+inline static bool compare_first(const std::pair<float, float> &a, const std::pair<float, float> &b) {
+    // auxiliary function for roc_auc_score
+    if (a.first != b.first) {
+        return a.first < b.first;
+    } else {
+        return a.second > b.second;
+    }
+};
+
+
+inline float calc_score(
+    const std::vector<float> &label, // aka true
+    const std::vector<float> &pred, // aka score
+    const int eval_metric,
+    const int loss_type
+    ) {
+
+    int n = static_cast<int>(label.size());
+
+    if (eval_metric == 0)  {
+        // mse
+        return 0.0f;
+
+    } else if (eval_metric == 1) {
+        // rmse
+        if (loss_type == 3) {
+            float sum = 0.0f;
+
+            //#pragma omp parallel for reduction(+:sum) schedule(static)
+            for (int i = 0; i < n; ++i) {
+                const float p = 1.0 / (1.0 + expf(-pred[i]));
+                const float y = label[i];
+                sum += ((p - y) * (p - y));
+            }
+            return sqrtf(sum / static_cast<float>(n));
+        } else {
+            float sum = 0.0f;
+
+            //#pragma omp parallel for reduction(+:sum) schedule(static)
+            for (int i = 0; i < n; ++i) {
+                const float p = pred[i];
+                const float y = label[i];
+                sum += ((p - y) * (p - y));
+            }
+            return sqrtf(sum / static_cast<float>(n));
+        }
+
+    } else if (eval_metric == 2) {
+        // mae
+        return 0.0f;
+
+    } else if (eval_metric == 3) {
+        // log loss
+        if (loss_type == 3) {
+            const float eps = 1.0e-15f;
+            float sum = 0.0f;
+
+            //#pragma omp parallel for reduction(+:sum) schedule(static)
+            for (int i = 0; i < n; ++i) {
+                const float p = 1.0f / (1.0f + expf(-pred[i])); // loss_type == los_loss?
+                const float py = p;
+                const float pn = 1.0f - p;
+                const float y  = label[i];
+
+                if (py < eps) {
+                    sum += - y * std::log(eps) - (1.0f - y) * std::log(1.0f - eps);
+                } else if (pn < eps) {
+                    sum += - y * std::log(1.0f - eps) - (1.0f - y) * std::log(eps);
+                } else {
+                    sum += - y * std::log(py) - (1.0 - y) * std::log(pn);
+                }
+            }
+
+            return (sum / static_cast<float>(n));
+        } else {
+            return 0.0f;
+        }
+
+    } else if (eval_metric == 4) {
+        // auc
+
+        std::vector< std::pair<float, float> > tv;
+        const int n = static_cast<int>(pred.size());
+        tv.resize(n);
+
+        bool a = true; 
+
+        for (int i = 0; i < static_cast<int>(pred.size()); i++) {
+            tv[i].first = pred[i];
+            tv[i].second = label[i];
+
+            if (a) {
+                // log_loss is expected
+                if ((pred[i] > 0.0f) != (label[i] > 0.5f)) {
+                    a = false;
+                }
+            }
+        }
+
+        if (a) { return 1.0f; }
+
+        std::sort(tv.begin(), tv.end(), compare_first);
+
+        // start intergration from the right top of the corner
+        int pos_cnt = 0, neg_cnt = 0;
+        float cor_pair = 0;
+
+        for (int i = 0; i < static_cast<int>(tv.size()); i++) {
+            if (tv[i].second > 0.5) { // label is true?
+                pos_cnt++;
+                cor_pair += neg_cnt;
+            } else {
+                neg_cnt++;
+            }
+        }
+
+        if (neg_cnt == 0 || pos_cnt == 0) {
+            return 0.0f;
+        } else {
+            return cor_pair / pos_cnt / neg_cnt;
+        }
+
+    } else if (eval_metric == 99) {
+        // user defined, check eval_maximize
+        return 0.0f;
+    } else {
+        return 0.0f;
+    }
+};
+
 
 class GradientBoostingMachine {
     public:
@@ -805,6 +945,7 @@ class GradientBoostingMachine {
     private:
         int num_threads;
         int seed;
+        int silent;
 
         int loss_type;
         float eta;
@@ -831,6 +972,31 @@ class GradientBoostingMachine {
         std::vector<float> grad;
         std::vector<float> hess;
 
+        //
+        Matrix *matrix_valid_ptr;
+        std::vector<float> label_valid;
+        std::vector<float> pred_valid;
+
+        int num_rows_valid;
+
+        //
+        std::vector<float> scores_train;
+        std::vector<float> scores_valid;
+
+        //
+        int train_mode; // 0: no monitor, 1: train, 2: train & valid
+
+        int  eval_metric; //
+        bool eval_maximize;
+
+        int early_stopping_rounds;
+        int early_stopping_count; 
+        float best_score_train;
+        float best_score_valid;
+        int  best_round;
+
+        int num_round;
+
 
     private:
         inline void init_num_threads(int num_threads) {
@@ -848,8 +1014,10 @@ class GradientBoostingMachine {
 
     public:
         GradientBoostingMachine(
+            // master list
             int num_threads,
             int seed,
+            int silent,
 
             int loss_type,
             float eta,
@@ -861,11 +1029,14 @@ class GradientBoostingMachine {
             float colsample_bytree,
 
             int normalize_target,
-            float gamma_zero
+            float gamma_zero,
+
+            int num_round
             ) {
             //
             this->num_threads = num_threads;
             this->seed = seed;
+            this->silent = silent;
 
             this->loss_type = loss_type;
             this->eta = eta;
@@ -879,6 +1050,8 @@ class GradientBoostingMachine {
             this->normalize_target = normalize_target;
             this->gamma_zero = gamma_zero;
 
+            this->num_round = num_round;
+
             //
             init_num_threads(num_threads);
         };
@@ -887,7 +1060,7 @@ class GradientBoostingMachine {
         };
 
 
-        inline void set_data(Matrix &matrix, std::vector<float> label) {
+        inline void set_data(Matrix &matrix, std::vector<float> &label) {
             this->matrix_ptr = &matrix;
             this->label = label;
 
@@ -928,74 +1101,175 @@ class GradientBoostingMachine {
             for (int row_index = 0; row_index < num_rows; ++row_index) {
                 pred[row_index] = bias;
             }
-        }
+        };
 
 
-        inline void boost_one_iter(int n) {
-            int round;
+        inline void set_data_valid(Matrix &matrix_valid, std::vector<float> &label_valid) {
 
-            for (int  i = 0; i < n; ++i) {
-                round = static_cast<int>(tree_ptrs.size());
+            this->matrix_valid_ptr = &matrix_valid;
+            this->label_valid = label_valid;
+            this->num_rows_valid = matrix_valid.getNumRows();
 
-                // just one iter
-                calc_grad_hess(label, pred, grad, hess, loss_type);
+            pred_valid.resize(num_rows_valid);
 
-                BaseTree *t = new BaseTree(
-                    num_rows,
-                    num_cols,
-
-                    num_threads,
-                    seed + round,
-
-                    eta,
-                    max_depth,
-                    min_child_weight,
-                    lambda,
-                    gamma,
-                    subsample, 
-                    colsample_bytree,
-
-                    gamma_zero
-                    );
+            //
+            for (int row_index = 0; row_index < num_rows_valid; ++row_index) {
+                pred_valid[row_index] = bias;
+            }
+        };
 
 
-                t->fit((*matrix_ptr), grad, hess);
- 
-                if (t->is_pruned()) {
-                    t->predict((*matrix_ptr), pred);
+        inline void set_train_mode(int train_mode) {
+            this->train_mode = train_mode;
+
+            if (train_mode > 0) {
+                scores_train.resize(2048);
+                scores_train.clear();
+            }
+            if (train_mode > 1) {
+                scores_valid.resize(2048);
+                scores_valid.clear();
+            }
+        };
+
+        inline void set_eval_metric(int eval_metric) {
+            this->eval_metric = eval_metric;
+
+            if (eval_metric == 4) { // auc
+                this->eval_maximize = true;
+            } else {
+                this->eval_maximize = false;
+            }
+        };
+
+        inline void set_early_stopping_rounds(int early_stopping_rounds) {
+            this->early_stopping_rounds = early_stopping_rounds;
+
+            // init for early_stopping
+            this->early_stopping_count = early_stopping_rounds;
+        };
+
+        inline int check_early_stopping(const int round, const float score_train, const float score_valid) {
+            // dont use count. just compare round & best_round must be better?
+            if (((score_valid != best_score_valid) && ((score_valid > best_score_valid) == eval_maximize)) || round == 0) {
+                best_score_train = score_train;
+                best_score_valid = score_valid;
+                best_round = round;
+                early_stopping_count = early_stopping_rounds;
+                return 2;
+            } else {
+                early_stopping_count -= 1;
+                if (early_stopping_count > 0) {
+                    return 1;
                 } else {
-                    t->predict_cache((*matrix_ptr), pred);
+                    return 0;
+                }
+            }
+        };
+
+        inline void get_scores(std::vector<float> &scores, int score_type) {
+            if (score_type == 0) {
+                scores = scores_train;
+            } else if (score_type == 1) {
+                scores = scores_valid;
+            }
+        };
+
+        inline int boost_one_iter(int n) {
+            // for now, n is just ignored and run just one iter
+
+            int round = static_cast<int>(tree_ptrs.size());
+
+            calc_grad_hess(label, pred, grad, hess, loss_type);
+
+            BaseTree *t = new BaseTree(
+                num_rows,
+                num_cols,
+
+                num_threads,
+                seed + round,
+
+                eta,
+                max_depth,
+                min_child_weight,
+                lambda,
+                gamma,
+                subsample, 
+                colsample_bytree,
+
+                gamma_zero
+                );
+
+
+            t->fit((*matrix_ptr), grad, hess);
+
+            // train
+            if (t->is_pruned()) {
+                t->predict((*matrix_ptr), pred);
+            } else {
+                t->predict_cache((*matrix_ptr), pred);
+            }
+
+
+            int round_status = 0; // 0: stop, 1,2: continue
+
+            if (train_mode == 0) {
+                if (round < num_round-1) {
+                    round_status= 1;
+                }
+                best_round = round;
+
+            } else if (train_mode == 2) {
+                float score_train, score_valid;
+
+                t->predict((*matrix_valid_ptr), pred_valid);
+                
+
+                #pragma omp parallel sections
+                {
+                    #pragma omp section
+                    {
+                        score_train = calc_score(label, pred, eval_metric, loss_type);
+                    }
+                    #pragma omp section
+                    {
+                        score_valid = calc_score(label_valid, pred_valid, eval_metric, loss_type);
+                    }
                 }
 
-                t->clear();
+                scores_train.push_back(score_train);
+                scores_valid.push_back(score_valid);
 
-                tree_ptrs.push_back(t);
+                round_status = check_early_stopping(round, score_train, score_valid);
+
+                // print
+                if (silent != 1) {
+                    // see termcolor (python package) for color printing
+                    fprintf(stderr, "[%4d]  train: %0.6f  valid: %0.6f  (best: %0.6f, %d)\n",
+                        round, score_train, score_valid, best_score_valid, best_round); // 
+
+                    if (round == num_round-1) {
+                        //fprintf(stderr, "max num_round.\n\n");
+                        fprintf(stderr, "\033[31mreached max num_round.\033[0m\n\n"); // red
+                    } else if (round_status == 0) {
+                        //fprintf(stderr, "early stopping.\n\n");
+                        fprintf(stderr, "\033[32mearly stopping.\033[0m\n\n"); // green
+                    }
+                }
             }
+
+            //
+            t->clear();
+            tree_ptrs.push_back(t);
+
+            return round_status; 
         };
 
-
-        inline float get_bias() {
-            // only for step prediction
-            return bias;
+        inline int get_best_round() {
+            return best_round;
         };
 
-        inline void predict_last(const Matrix &matrix, std::vector<float> &pred) {
-            // only for step prediction
-
-            int num_rows = matrix.getNumRows();
-            pred.resize(num_rows);
-
-            for (int row_index = 0; row_index < num_rows; ++row_index) {
-                pred[row_index] = 0.0f;
-            }
-
-            int num_trees = static_cast<int>(tree_ptrs.size());
-
-            tree_ptrs[num_trees - 1]->predict(matrix, pred);
-        };
-
-
-        inline void predict(const Matrix &matrix, std::vector<float> &pred, int num_trees_limit) {
+        inline void predict(const Matrix &matrix, std::vector<float> &pred, int round) {
             // predict by all trees
             int num_rows = matrix.getNumRows();
             int num_trees = tree_ptrs.size();
@@ -1006,14 +1280,25 @@ class GradientBoostingMachine {
                 pred[row_index] = bias;
             }
 
-            if (num_trees_limit > -1) {
-                num_trees = num_trees_limit;
+            if (round > -1) {
+                num_trees = round + 1;
             } else {
                 num_trees = num_trees;
             }
 
             for (int tree_index = 0; tree_index < num_trees; ++tree_index) {
                 tree_ptrs[tree_index]->predict(matrix, pred);
+            }
+
+            if (loss_type == 3) {
+                const float epsi = 1.0e-15;
+                #pragma omp parallel for schedule(static)
+                for (int i = 0; i < num_rows; ++i) {
+                    float p = 1.0f / (1.0f + expf(-pred[i])); 
+                    p = p < epsi ? epsi : p;
+                    p = p > 1.0-epsi ? 1.0-epsi : p;
+                    pred[i] = p;
+                }
             }
         };
 
