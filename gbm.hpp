@@ -1062,6 +1062,11 @@ class GradientBoostingMachine {
         };
 
         ~GradientBoostingMachine() {
+            int num_trees = static_cast<int>(tree_ptrs.size());
+
+            for (int tree_index = 0; tree_index < num_trees; ++tree_index) {
+                delete tree_ptrs[tree_index];
+            }
         };
 
 
