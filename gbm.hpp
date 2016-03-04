@@ -809,11 +809,7 @@ inline void calc_grad_hess(
 
 inline static bool compare_first(const std::pair<float, float> &a, const std::pair<float, float> &b) {
     // auxiliary function for roc_auc_score
-    if (a.first != b.first) {
-        return a.first < b.first;
-    } else {
-        return a.second > b.second;
-    }
+    return a.first < b.first;
 };
 
 
@@ -887,53 +883,62 @@ inline float calc_score(
 
     } else if (eval_metric == 4) {
         // auc
+        // taken from xgboost's code and modified a little bit
 
-        std::vector< std::pair<float, float> > tv;
+        std::vector< std::pair<float, float> > rec;
         const int n = static_cast<int>(pred.size());
-        tv.resize(n);
+        rec.resize(n);
 
-        bool a = true; 
+        bool a = true;
 
         for (int i = 0; i < static_cast<int>(pred.size()); i++) {
-            tv[i].first = pred[i];
-            tv[i].second = label[i];
+            rec[i].first = pred[i];
+            rec[i].second = label[i];
 
-            if (a) {
-                // log_loss is expected
-                if ((pred[i] > 0.0f) != (label[i] > 0.5f)) {
-                    a = false;
-                }
-            }
+            if (a) { if ((pred[i] > 0.0f) != (label[i] > 0.5f)) { a = false; } }
         }
-
         if (a) { return 1.0f; }
 
-        std::sort(tv.begin(), tv.end(), compare_first);
+        std::sort(rec.begin(), rec.end(), compare_first);
 
-        // start intergration from the right top of the corner
-        int pos_cnt = 0, neg_cnt = 0;
-        float cor_pair = 0;
+        double sum_auc = 0.0;
+        double sum_negpair = 0.0;
+        double sum_npos = 0.0;
+        double sum_nneg = 0.0;
+        double buf_pos = 0.0; // number of pos samples
+        double buf_neg = 0.0; // number of neg samples
 
-        for (int i = 0; i < static_cast<int>(tv.size()); i++) {
-            if (tv[i].second > 0.5) { // label is true?
-                pos_cnt++;
-                cor_pair += neg_cnt;
-            } else {
-                neg_cnt++;
+        for (int j = 0; j < static_cast<int>(rec.size()); ++j){
+            // keep bucketing predictions in same bucket
+            if (j != 0 && rec[j].first != rec[j - 1].first){ // first->pred
+                sum_negpair += buf_pos * (sum_nneg + buf_neg * 0.5); // 0.5 for diagonal
+                sum_npos += buf_pos;
+                sum_nneg += buf_neg;
+                buf_pos = 0.0;
+                buf_neg = 0.0;
             }
+            buf_pos += (rec[j].second);
+            buf_neg += (1.0 - rec[j].second); // second->label
         }
+        sum_negpair += buf_pos * (sum_nneg + buf_neg * 0.5);
+        sum_npos += buf_pos;
+        sum_nneg += buf_neg;
 
-        if (neg_cnt == 0 || pos_cnt == 0) {
-            return 0.0f;
+        //
+        if (sum_npos > 0.0 && sum_nneg > 0.0) {
+            sum_auc += sum_negpair / (sum_npos*sum_nneg);
+            return static_cast<float>(sum_auc);
         } else {
-            return cor_pair / pos_cnt / neg_cnt;
+            return 0.0f;
         }
 
     } else if (eval_metric == 99) {
         // user defined, check eval_maximize
         return 0.0f;
+
     } else {
         return 0.0f;
+
     }
 };
 
