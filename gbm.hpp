@@ -1291,12 +1291,12 @@ class GradientBoostingMachine {
             }
 
             if (loss_type == 3) {
-                const float epsi = 1.0e-15;
+                const float epsi = 1.0e-15f;
                 #pragma omp parallel for schedule(static)
                 for (int i = 0; i < num_rows; ++i) {
                     float p = 1.0f / (1.0f + expf(-pred[i])); 
                     p = p < epsi ? epsi : p;
-                    p = p > 1.0-epsi ? 1.0-epsi : p;
+                    p = p > 1.0f-epsi ? 1.0f-epsi : p;
                     pred[i] = p;
                 }
             }
