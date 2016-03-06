@@ -857,7 +857,7 @@ inline float calc_score(
     } else if (eval_metric == 3) {
         // log loss
         if (loss_type == 3) {
-            const float eps = 1.0e-15f;
+            const float eps = 1.0e-6f;
             float sum = 0.0f;
 
             //#pragma omp parallel for reduction(+:sum) schedule(static)
@@ -1301,12 +1301,12 @@ class GradientBoostingMachine {
             }
 
             if (loss_type == 3) {
-                const float epsi = 1.0e-15f;
+                const float eps = 1.0e-6f;
                 #pragma omp parallel for schedule(static)
                 for (int i = 0; i < num_rows; ++i) {
                     float p = 1.0f / (1.0f + expf(-pred[i])); 
-                    p = p < epsi ? epsi : p;
-                    p = p > 1.0f-epsi ? 1.0f-epsi : p;
+                    p = p < eps ? eps : p;
+                    p = p > 1.0f-eps ? 1.0f-eps : p;
                     pred[i] = p;
                 }
             }
