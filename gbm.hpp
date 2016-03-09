@@ -47,15 +47,13 @@ class Split {
             float feat_value,
             float gain,
             float sum_grad,
-            float sum_hess,
-            int count
+            float sum_hess
             ) {
             this->col_index = col_index;
             this->feat_value = feat_value;
             this->gain = gain;
             this->sum_grad = sum_grad;
             this->sum_hess = sum_hess;
-            this->count = count;
         };
 
         int col_index; // index to split
@@ -64,7 +62,6 @@ class Split {
         float gain;
         float sum_grad;
         float sum_hess;
-        int count;
 };
 
 
@@ -72,7 +69,6 @@ class Stat {
     public:
         float sum_grad;
         float sum_hess;
-        int count;
 
         float prev_value;
 };
@@ -86,7 +82,6 @@ class Node {
             float sum_grad,
             float sum_hess,
             float root_gain,
-            int count,
             float weight,
             int parent_index
             ) :
@@ -94,7 +89,6 @@ class Node {
             sum_grad(sum_grad), 
             sum_hess(sum_hess), 
             root_gain(root_gain),
-            count(count),
             weight(weight),
             parent_index(parent_index)
             {};
@@ -103,7 +97,6 @@ class Node {
             float sum_grad,
             float sum_hess,
             float root_gain,
-            int count,
             float weight,
             int parent_index
             ) {
@@ -112,7 +105,6 @@ class Node {
             this->sum_grad = sum_grad;
             this->sum_hess = sum_hess;
             this->root_gain = root_gain;
-            this->count = count;
             this->weight = weight;
             this->parent_index = parent_index;
         };
@@ -144,7 +136,6 @@ class Node {
         float sum_hess;
         float root_gain;
         float gain;
-        int count;
 
         int col_index;
         float feat_value;
@@ -209,11 +200,6 @@ class BaseTree {
 
         // tree statistics
         int num_pruned;
-
-        // for cost calculation
-        int num_alive;
-        int num_dead;
-
 
     public:
         BaseTree(
@@ -387,7 +373,6 @@ class BaseTree {
 
             float sum_grad = 0.0f;
             float sum_hess = 0.0f;
-            int count = 0;
 
             // dont' do this since it can harm reproducibility?
             //#pragma omp parallel for reduction(+:sum_grad,sum_hess,count) schedule(static)
@@ -395,7 +380,6 @@ class BaseTree {
                 int row_index = row_index_list[i];
                 sum_grad += grad[row_index];
                 sum_hess += hess[row_index];
-                count += 1;
             }
 
 
@@ -404,7 +388,6 @@ class BaseTree {
                 sum_grad,
                 sum_hess,
                 calc_gain(sum_grad, sum_hess, lambda), // root_gain
-                count,
                 calc_weight(sum_grad, sum_hess, lambda),
                 -1 // parent_index
                 );
@@ -418,10 +401,6 @@ class BaseTree {
 
             offset = 0;
             num_newnode = 1;
-
-            //
-            num_alive = num_rows_sampled;
-            num_dead = 0;
         };
 
 
@@ -478,7 +457,6 @@ class BaseTree {
                 for (int i_newnode = 0; i_newnode < num_newnode; ++i_newnode) {
                     tmp_stats[i_thread][i_newnode].sum_grad = 0.0f;
                     tmp_stats[i_thread][i_newnode].sum_hess = 0.0f;
-                    tmp_stats[i_thread][i_newnode].count = 0;
                 }
 
                 //
@@ -519,8 +497,7 @@ class BaseTree {
                                             (itr->value + t->prev_value) * 0.5f, // feat_value
                                             gain,
                                             t->sum_grad,
-                                            t->sum_hess,
-                                            t->count
+                                            t->sum_hess
                                             );
                                     }
                                 }
@@ -530,7 +507,6 @@ class BaseTree {
 
                     t->sum_grad += itr->grad;
                     t->sum_hess += itr->hess;
-                    t->count += 1;
                     t->prev_value = itr->value;
                 }
             }
@@ -553,8 +529,7 @@ class BaseTree {
                             u->feat_value,
                             u->gain,
                             u->sum_grad,
-                            u->sum_hess,
-                            u->count
+                            u->sum_hess
                             );  
                     }
                 }
@@ -612,24 +587,20 @@ class BaseTree {
                     
                 // add new
                 float g, h; // sum_grad, sum_hess
-                int c; // count
 
                 for (int j = 0; j < 2; ++j) {
                     if (j == 0) {
                         g = s->sum_grad;
                         h = s->sum_hess;
-                        c = s->count;
                     } else {
                         g = (t->sum_grad - s->sum_grad);
                         h = (t->sum_hess - s->sum_hess);
-                        c = (t->count - s->count);
                     }
 
                     nodes[child_nodes[i_queue] + j].update_child(
                         g, // sum_grad
                         h, // sum_hess
                         calc_gain(g, h, lambda), // root gain
-                        c, // count
                         calc_weight(g, h, lambda), // weight
                         queues[i_queue] // parent_index
                         );
@@ -657,15 +628,6 @@ class BaseTree {
 
             }
         
-            // (8) sum up dead nodes (nodes that pruned)
-            for (int i_queue = 0; i_queue < num_queues; ++i_queue) {
-                Node *t = &nodes[queues[i_queue]];
-                if (t->is_leaf) {
-                    num_alive -= t->count;
-                    num_dead += t->count;
-                }
-            };
-
             queues = new_queues;
             offset = new_offset;
         };
