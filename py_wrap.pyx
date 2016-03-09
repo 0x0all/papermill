@@ -37,12 +37,12 @@ cdef extern from "wrap.hpp":
     void DeleteGradientBoostingMachine(GradientBoostingMachine *gbm_ptr)
 
     void GradientBoostingMachineSetData(
-        GradientBoostingMachine *grm_ptr,
+        GradientBoostingMachine *gbm_ptr,
         Matrix *matrix_ptr,
         vector[float] label
         )
     void GradientBoostingMachineSetDataValid(
-        GradientBoostingMachine *grm_ptr,
+        GradientBoostingMachine *gbm_ptr,
         Matrix *matrix_ptr,
         vector[float] label
         )
@@ -59,11 +59,11 @@ cdef extern from "wrap.hpp":
         int early_stopping_rounds
         )
     vector[float] GradientBoostingMachineGetScores(
-        GradientBoostingMachine *grm_ptr,
+        GradientBoostingMachine *gbm_ptr,
         int score_type
         )
     int GradientBoostingMachineGetBestRound(
-        GradientBoostingMachine *grm_ptr
+        GradientBoostingMachine *gbm_ptr
         )
 
     int GradientBoostingMachineBoostOneIter(
@@ -71,7 +71,7 @@ cdef extern from "wrap.hpp":
         int n
         )
     vector[float] GradientBoostingMachinePredict(
-        GradientBoostingMachine *grm_ptr,
+        GradientBoostingMachine *gbm_ptr,
         Matrix *matrix_ptr,
         int r
         )
@@ -165,5 +165,5 @@ cdef class pyGradientBoostingMachine:
     def _boost_one_iter(self, int n = 1):
         return GradientBoostingMachineBoostOneIter(self.thisptr, n)
 
-    def predict(self, pyMatrix matrix, int r = -1):
+    def _predict(self, pyMatrix matrix, int r = -1):
         return GradientBoostingMachinePredict(self.thisptr, <Matrix*> matrix.thisptr, r)

@@ -228,7 +228,7 @@ class Papermill (object):
 
         matrix_test = pyMatrix(data_test)
 
-        label_test = self._gbm.predict(matrix_test, self.best_round)
+        label_test = self._gbm._predict(matrix_test, self.best_round)
         label_test = np.array(label_test, dtype=np.float32)
 
         return label_test
