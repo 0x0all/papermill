@@ -766,6 +766,7 @@ inline void calc_grad_hess(
 
 // ------------------------------------------------------------
 // for calculating score
+// part of them are taken from xgboost's code and modified
 // ------------------------------------------------------------
 
 
@@ -795,7 +796,7 @@ inline float calc_score(
 
             //#pragma omp parallel for reduction(+:sum) schedule(static)
             for (int i = 0; i < n; ++i) {
-                const float p = 1.0 / (1.0 + expf(-pred[i]));
+                const float p = 1.0f / (1.0f + expf(-pred[i]));
                 const float y = label[i];
                 sum += ((p - y) * (p - y));
             }
@@ -834,7 +835,7 @@ inline float calc_score(
                 } else if (pn < eps) {
                     sum += - y * std::log(1.0f - eps) - (1.0f - y) * std::log(eps);
                 } else {
-                    sum += - y * std::log(py) - (1.0 - y) * std::log(pn);
+                    sum += - y * std::log(py) - (1.0f - y) * std::log(pn);
                 }
             }
 
@@ -844,8 +845,6 @@ inline float calc_score(
         }
 
     } else if (eval_metric == 4) {
-        // auc
-        // taken from xgboost's code and modified a little bit
 
         std::vector< std::pair<float, float> > rec;
         const int n = static_cast<int>(pred.size());
