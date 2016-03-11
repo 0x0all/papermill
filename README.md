@@ -11,7 +11,41 @@ Requirements
 * Cython 0.23.4
 * numpy 1.10.4
 
-`make` to build. Append the root directory to `sys.path` to use.
+
+Installation
+-----
+
+```
+pip install git+https://github.com/khyh/papermill.git --user
+```
+
+
+Example
+-----
+
+```py
+from papermill import Papermill
+
+
+ppm = Papermill(seed = 0, loss_type = "log_loss", eta = 0.01,
+    subsample = 0.8, colsample_bytree = 0.8, num_round = 300)
+
+
+# simple fit
+ppm.fit(data_train, label_train)
+
+pred_test = ppm.predict(data_test)
+
+
+# early stopping
+ppm.fit(
+    data_train, label_train, # train data
+    data_valid, label_valid, # additional data for validation
+    "roc_auc_score",         # metrics to monitor. "rmse", "log_loss", "roc_auc_score" is supported
+    10)                      # validation error needs to decrease at every 10 rounds
+
+pred_test = ppm.predict(data_test) # best round is used by default
+```
 
 
 Parameters
@@ -33,7 +67,7 @@ Parameters
   - maximum depth of trees.
 * min_child_weight [default=1.0]
   - minimum sum of instance hessian needed in a child. 
-* lambda [default=1.0]
+* lambda_ [default=1.0]
   - L2 regularization term on weights.
 * gamma [default=0.0]
   - minimum gain to make a node split while pruning a tree.
@@ -49,38 +83,6 @@ Parameters
   - minimum gain to make a node split while growing a tree.
 * num_round [default=100]
   - number of maximum trees to train.
-
-
-Example
------
-
-```py
-
-import sys
-
-sys.path.append('papermill/')
-from papermill import Papermill
-
-
-ppm = Papermill(seed = 0, loss_type = "log_loss", eta = 0.01,
-    subsample = 0.8, colsample_bytree = 0.8, num_round = 300)
-
-
-# simple fit
-ppm.fit(data_train, label_train)
-
-pred_test = ppm.predict(data_test)
-
-
-# early stopping
-ppm.fit(
-    data_train, label_train,
-    data_valid, label_valid, # additional data for validation
-    "roc_auc_score",         # metrics to monitor. "rmse", "log_loss", "roc_auc_score" is supported
-    10)                      # validation error needs to decrease at every 10 rounds
-
-pred_test = ppm.predict(data_test) # best round is used by default
-```
 
 
 References
