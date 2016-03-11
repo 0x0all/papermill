@@ -3,8 +3,17 @@ from distutils.extension import Extension
 from Cython.Distutils import build_ext
 
 setup(
-    name="gbm",
+    name="papermill",
+    version="0.0.1",
+    description="xgboost-style gradient boosting machine",
+    url="https://github.com/khyh/papermill",
+    author="khyh",
+    author_email="khyh@outlook.com",
 
+    # main
+    py_modules=[ "papermill" ],
+
+    # ext
     ext_modules=[
         Extension(
             "gbm",

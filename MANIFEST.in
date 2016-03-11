@@ -1,0 +1,3 @@
+include Makefile
+include *.hpp
+include *.pyx
